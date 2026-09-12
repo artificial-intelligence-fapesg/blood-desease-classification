@@ -1,0 +1,4 @@
+.venv/
+models_sangue/
+__pycache__/
+blood_app.db
