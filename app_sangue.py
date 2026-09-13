@@ -23,6 +23,7 @@ from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 import database_sangue as db
 from blood_detector import (
@@ -66,6 +67,23 @@ CLASS_COLORS = {
     "Diabetes": "#5B4FCF",
 }
 
+CLASS_ICONS = {
+    "Saudável": "🟢",
+    "Hipertenso": "🟠",
+    "Leucemia": "🔴",
+    "Diabetes": "🟣",
+}
+
+# Quantidade máxima de exames exibidos por página no histórico de detecções.
+ITENS_POR_PAGINA_HISTORICO = 5
+
+ACHADOS_POR_CLASSE = {
+    "Saudável": "Parâmetros hematológicos, glicêmicos e pressóricos <strong>dentro da normalidade</strong>, sem sinais sugestivos das condições avaliadas.",
+    "Hipertenso": "Padrão <strong>sugestivo de hipertensão arterial</strong>, com base nos valores pressóricos informados.",
+    "Leucemia": "Padrão hematológico <strong>sugestivo de doença hematológica maligna (leucemia)</strong>, com base nas alterações do hemograma (ex.: leucocitose acentuada e/ou plaquetopenia).",
+    "Diabetes": "Padrão <strong>sugestivo de diabetes mellitus</strong>, com base na glicemia de jejum informada.",
+}
+
 st.markdown(
     """
     <style>
@@ -107,6 +125,24 @@ st.markdown(
             display: flex; justify-content: flex-end; align-items: center;
             border: 1px solid #E3E8EE; border-radius: 8px;
             padding: 0.55rem 0.9rem; margin-bottom: 0.4rem; font-size: 0.9rem;
+        }
+
+        /* --- Caixa de exames/dados no histórico --- */
+        .exam-info-row {
+            display: flex; justify-content: space-between;
+            padding: 0.3rem 0; font-size: 0.88rem;
+            border-bottom: 1px dashed #E3E8EE;
+        }
+        .exam-info-row .rotulo { color: #5A6B7B; }
+        .exam-info-row .valor { color: #2C3B4A; font-weight: 600; text-align: right; }
+
+        /* --- Faz a caixa de tags do multiselect (sintomas, comorbidades,
+             etc.) ficar em uma única linha, com rolagem horizontal, em vez
+             de cortar os itens já adicionados. A rolagem com a roda do
+             mouse é habilitada via JavaScript no final do arquivo. --- */
+        div[data-testid="stMultiSelect"] [data-baseweb="tag"] {
+            flex-shrink: 0;
+            margin: 3px !important;
         }
     </style>
     """,
@@ -412,15 +448,8 @@ with tab_novo:
                 # -- Exibição do resultado ------------------------------------------
                 with result_placeholder.container():
                     color = CLASS_COLORS.get(result.label, "#0B3D66")
-                    icon = {"Saudável": "🟢", "Hipertenso": "🟠", "Leucemia": "🔴", "Diabetes": "🟣"}.get(result.label, "⚪")
-
-                    achados = {
-                        "Saudável": "Parâmetros hematológicos, glicêmicos e pressóricos <strong>dentro da normalidade</strong>, sem sinais sugestivos das condições avaliadas.",
-                        "Hipertenso": "Padrão <strong>sugestivo de hipertensão arterial</strong>, com base nos valores pressóricos informados.",
-                        "Leucemia": "Padrão hematológico <strong>sugestivo de doença hematológica maligna (leucemia)</strong>, com base nas alterações do hemograma (ex.: leucocitose acentuada e/ou plaquetopenia).",
-                        "Diabetes": "Padrão <strong>sugestivo de diabetes mellitus</strong>, com base na glicemia de jejum informada.",
-                    }
-                    achado = achados.get(result.label, "")
+                    icon = CLASS_ICONS.get(result.label, "⚪")
+                    achado = ACHADOS_POR_CLASSE.get(result.label, "")
 
                     modelo_txt = (
                         f"Votação entre {len(modelos_ensemble)} modelos ({metodo_votacao})"
@@ -509,71 +538,210 @@ with tab_historico:
     if not registros:
         st.info("Nenhum registro encontrado. Realize uma análise na aba **Novo Diagnóstico**.")
     else:
-        df = pd.DataFrame(registros)
-        df_display = df[
-            ["data_deteccao", "nome", "prontuario", "idade", "sexo", "label",
-             "confidence", "modelo_utilizado", "concordancia_modelos"]
-        ].copy()
-        df_display.columns = [
-            "Data/Hora", "Paciente", "Prontuário", "Idade", "Sexo",
-            "Resultado", "Confiança", "Modelo(s)", "Concordância",
-        ]
-        df_display["Confiança"] = (df_display["Confiança"] * 100).round(1).astype(str) + "%"
-        df_display["Concordância"] = df_display["Concordância"].map(
-            {1: "✅ Unânime", 0: "⚠️ Divergência"}
-        ).fillna("—")
+        # -- Controle de qual exame está com os detalhes abertos --------------
+        if "detalhe_id" not in st.session_state:
+            st.session_state["detalhe_id"] = None
 
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        ids_disponiveis = {r["detection_id"] for r in registros}
+        if st.session_state["detalhe_id"] not in ids_disponiveis:
+            # Se o exame selecionado não está mais na lista filtrada (ou é a
+            # primeira visita à aba), abre os detalhes do mais recente.
+            st.session_state["detalhe_id"] = registros[0]["detection_id"]
 
-        st.markdown("#### Detalhes do Exame")
-        opcoes_detalhe = {
-            f"#{r['detection_id']} · {r['nome']} · {r['data_deteccao']}": r for r in registros
-        }
-        escolha = st.selectbox("Selecione um exame para ver o detalhe completo", list(opcoes_detalhe.keys()))
-        registro = opcoes_detalhe[escolha]
+        # -- Controle de paginação ----------------------------------------------
+        # Reinicia a página para a primeira sempre que os filtros de busca
+        # mudam, para não deixar o usuário "perdido" numa página vazia.
+        filtro_atual = (busca, filtro_resultado)
+        if st.session_state.get("historico_filtro_anterior") != filtro_atual:
+            st.session_state["historico_filtro_anterior"] = filtro_atual
+            st.session_state["historico_pagina"] = 0
 
-        dcol1, dcol2 = st.columns([1, 1.3])
-        with dcol1:
-            st.markdown("**Valores laboratoriais informados:**")
-            lab_rows = [
-                ("Hemoglobina", f"{registro.get('hemoglobina', '—')} g/dL"),
-                ("Hematócrito", f"{registro.get('hematocrito', '—')} %"),
-                ("Hemácias", f"{registro.get('hemacias', '—')} milhões/mm³"),
-                ("Leucócitos", f"{registro.get('leucocitos', '—')} /mm³"),
-                ("Plaquetas", f"{registro.get('plaquetas', '—')} mil/mm³"),
-                ("Glicemia", f"{registro.get('glicemia', '—')} mg/dL"),
-                ("Pressão arterial", f"{registro.get('pressao_sistolica', '—')}/{registro.get('pressao_diastolica', '—')} mmHg"),
-            ]
-            for label_lab, valor in lab_rows:
-                st.caption(f"- **{label_lab}:** {valor}")
+        if "historico_pagina" not in st.session_state:
+            st.session_state["historico_pagina"] = 0
 
-        with dcol2:
-            st.markdown(f"**Paciente:** {registro['nome']} ({registro.get('idade', '—')} anos, {registro.get('sexo', '—')})")
-            st.markdown(f"**Prontuário:** {registro.get('prontuario') or '—'}")
-            st.markdown(f"**Data do exame:** {registro.get('data_exame') or '—'}")
-            st.markdown(f"**Médico solicitante:** {registro.get('medico_solicitante') or '—'}")
-            st.markdown(f"**Indicação clínica:** {registro.get('indicacao_clinica') or '—'}")
-            st.markdown(f"**Resultado:** {registro['label']} (confiança {registro['confidence']*100:.1f}%)")
-            st.markdown(f"**Modelo(s) utilizado(s):** {registro['modelo_utilizado']}")
-            st.markdown(f"**Responsável técnico:** {registro.get('responsavel_tecnico') or '—'}")
+        total_paginas = max(1, -(-len(registros) // ITENS_POR_PAGINA_HISTORICO))  # ceil
+        st.session_state["historico_pagina"] = min(
+            st.session_state["historico_pagina"], total_paginas - 1
+        )
+        pagina_atual = st.session_state["historico_pagina"]
 
-            st.markdown("**Probabilidades por classe:**")
-            for classe, campo in [
-                ("Saudável", "prob_saudavel"),
-                ("Hipertenso", "prob_hipertenso"),
-                ("Leucemia", "prob_leucemia"),
-                ("Diabetes", "prob_diabetes"),
-            ]:
-                valor = registro.get(campo)
-                if valor is not None:
-                    st.caption(f"- {classe}: {valor*100:.1f}%")
+        inicio = pagina_atual * ITENS_POR_PAGINA_HISTORICO
+        fim = inicio + ITENS_POR_PAGINA_HISTORICO
+        registros_pagina = registros[inicio:fim]
 
-            if registro.get("votos_individuais"):
-                import json
-                votos = json.loads(registro["votos_individuais"])
-                st.markdown("**Detalhe da votação:**")
-                for v in votos:
-                    st.caption(f"- {v['modelo']}: {v['label']} ({v['confidence']*100:.1f}%)")
+        st.caption(
+            f"{len(registros)} exame(s) encontrado(s) · "
+            f"Exibindo {inicio + 1}–{min(fim, len(registros))} de {len(registros)}"
+        )
+
+        # -- Cabeçalho da tabela ------------------------------------------------
+        col_widths = [1.3, 1.8, 1.1, 0.9, 1.1, 0.9]
+        headers = ["Data/Hora", "Paciente", "Resultado", "Confiança", "Concordância", ""]
+        header_cols = st.columns(col_widths)
+        for col, texto in zip(header_cols, headers):
+            col.markdown(f"<span style='font-size:0.8rem; color:#5A6B7B; font-weight:700; text-transform:uppercase;'>{texto}</span>", unsafe_allow_html=True)
+        st.markdown("<hr style='margin:0.2rem 0 0.6rem 0;'>", unsafe_allow_html=True)
+
+        # -- Linhas da tabela (apenas da página atual), cada uma com botão
+        #    "Visualizar" ---------------------------------------------------
+        for r in registros_pagina:
+            is_selecionado = r["detection_id"] == st.session_state["detalhe_id"]
+            with st.container(border=True):
+                row_cols = st.columns(col_widths, vertical_alignment="center")
+                row_cols[0].write(r["data_deteccao"])
+                row_cols[1].write(f"**{r['nome']}**")
+
+                cor = CLASS_COLORS.get(r["label"], "#5A6B7B")
+                icone = CLASS_ICONS.get(r["label"], "⚪")
+                row_cols[2].markdown(
+                    f"<span style='color:{cor}; font-weight:700;'>{icone} {r['label']}</span>",
+                    unsafe_allow_html=True,
+                )
+                row_cols[3].write(f"{r['confidence']*100:.1f}%")
+
+                concordancia = r.get("concordancia_modelos")
+                if concordancia == 1:
+                    row_cols[4].markdown("✅ Unânime")
+                elif concordancia == 0:
+                    row_cols[4].markdown("⚠️ Divergência")
+                else:
+                    row_cols[4].write("—")
+
+                botao_label = "🔎 Visualizando" if is_selecionado else "👁️ Visualizar"
+                if row_cols[5].button(
+                    botao_label, key=f"ver_{r['detection_id']}",
+                    use_container_width=True,
+                    type="primary" if is_selecionado else "secondary",
+                ):
+                    st.session_state["detalhe_id"] = r["detection_id"]
+                    st.rerun()
+
+        # -- Controles de paginação ----------------------------------------------
+        if total_paginas > 1:
+            nav_cols = st.columns([1, 2, 1])
+            with nav_cols[0]:
+                if st.button("⬅️ Anterior", disabled=(pagina_atual == 0), use_container_width=True):
+                    st.session_state["historico_pagina"] -= 1
+                    st.rerun()
+            with nav_cols[1]:
+                st.markdown(
+                    f"<div style='text-align:center; padding-top:0.4rem; color:#5A6B7B;'>"
+                    f"Página {pagina_atual + 1} de {total_paginas}</div>",
+                    unsafe_allow_html=True,
+                )
+            with nav_cols[2]:
+                if st.button("Próxima ➡️", disabled=(pagina_atual >= total_paginas - 1), use_container_width=True):
+                    st.session_state["historico_pagina"] += 1
+                    st.rerun()
+
+        # -- Painel de detalhes do exame selecionado ----------------------------
+        registro = next((r for r in registros if r["detection_id"] == st.session_state["detalhe_id"]), None)
+
+        if registro:
+            st.markdown("---")
+            st.markdown(f"### 📋 Detalhes do Exame — {registro['nome']}")
+
+            cor = CLASS_COLORS.get(registro["label"], "#0B3D66")
+            icone = CLASS_ICONS.get(registro["label"], "⚪")
+            achado = ACHADOS_POR_CLASSE.get(registro["label"], "")
+
+            st.markdown(
+                f"""
+                <div class="diagnosis-box" style="border: 2px solid {cor};">
+                    <h3>{icone} Resultado: {registro['label']}</h3>
+                    <p>{achado}</p>
+                    <p><strong>Confiança do resultado:</strong> {registro['confidence']*100:.1f}%</p>
+                    <p style="font-size:0.85rem; color:#5A6B7B;">
+                        Exame: {registro.get('prontuario') or "não identificado"} ·
+                        Modelo(s): {registro['modelo_utilizado']} ·
+                        Processado em {registro['data_deteccao']}
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            dcol1, dcol2 = st.columns([1, 1.1], gap="large")
+
+            with dcol1:
+                st.markdown("#### 🧑‍⚕️ Dados do paciente e do exame")
+                info_rows = [
+                    ("Idade", f"{registro.get('idade', '—')} anos"),
+                    ("Sexo", registro.get("sexo") or "—"),
+                    ("Prontuário", registro.get("prontuario") or "—"),
+                    ("Data do exame", registro.get("data_exame") or "—"),
+                    ("Médico solicitante", registro.get("medico_solicitante") or "—"),
+                    ("Indicação clínica", registro.get("indicacao_clinica") or "—"),
+                    ("Responsável técnico", registro.get("responsavel_tecnico") or "—"),
+                ]
+                info_html = "".join(
+                    f"""<div class="exam-info-row">
+                            <span class="rotulo">{rotulo}</span>
+                            <span class="valor">{valor}</span>
+                        </div>"""
+                    for rotulo, valor in info_rows
+                )
+                st.markdown(info_html, unsafe_allow_html=True)
+
+                st.markdown("#### 🧪 Valores laboratoriais")
+                lab_rows = [
+                    ("Hemoglobina", f"{registro.get('hemoglobina', '—')} g/dL"),
+                    ("Hematócrito", f"{registro.get('hematocrito', '—')} %"),
+                    ("Hemácias", f"{registro.get('hemacias', '—')} milhões/mm³"),
+                    ("Leucócitos", f"{registro.get('leucocitos', '—')} /mm³"),
+                    ("Plaquetas", f"{registro.get('plaquetas', '—')} mil/mm³"),
+                    ("Glicemia", f"{registro.get('glicemia', '—')} mg/dL"),
+                    ("Pressão arterial", f"{registro.get('pressao_sistolica', '—')}/{registro.get('pressao_diastolica', '—')} mmHg"),
+                ]
+                lab_html = "".join(
+                    f"""<div class="exam-info-row">
+                            <span class="rotulo">{rotulo}</span>
+                            <span class="valor">{valor}</span>
+                        </div>"""
+                    for rotulo, valor in lab_rows
+                )
+                st.markdown(lab_html, unsafe_allow_html=True)
+
+            with dcol2:
+                st.markdown("#### 📊 Probabilidades por classe")
+                prob_cols = st.columns(2)
+                probs_por_classe = [
+                    ("Saudável", "prob_saudavel"),
+                    ("Hipertenso", "prob_hipertenso"),
+                    ("Leucemia", "prob_leucemia"),
+                    ("Diabetes", "prob_diabetes"),
+                ]
+                for i, (classe, campo) in enumerate(probs_por_classe):
+                    valor = registro.get(campo)
+                    if valor is not None:
+                        with prob_cols[i % 2]:
+                            st.metric(f"{CLASS_ICONS.get(classe, '')} {classe}", f"{valor*100:.1f}%")
+                            st.progress(valor)
+
+                if registro.get("votos_individuais"):
+                    import json
+                    votos = json.loads(registro["votos_individuais"])
+                    st.markdown("#### 🗳️ Detalhamento da votação por modelo")
+                    for v in votos:
+                        vote_color = CLASS_COLORS.get(v["label"], "#5A6B7B")
+                        probs_modelo = v.get("probabilities", {})
+                        detalhe_probs = " · ".join(
+                            f"{c}: {probs_modelo.get(c, 0)*100:.1f}%" for c in CLASSES
+                        ) if probs_modelo else ""
+                        st.markdown(
+                            f"""
+                            <div class="vote-row" style="flex-direction: column; align-items: flex-start;">
+                                <div style="display:flex; justify-content: space-between; width: 100%;">
+                                    <strong>{v['modelo']}:&nbsp</strong>
+                                    <span style="color:{vote_color}; font-weight:700;">{v['label']} ({v['confidence']*100:.1f}%)</span>
+                                </div>
+                                <div style="font-size:0.78rem; color:#5A6B7B; margin-top:0.2rem;">{detalhe_probs}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+        else:
+            st.info("Selecione um exame na lista acima para ver os detalhes.")
 
 # ---------------------------------------------------------------------------
 # Rodapé
@@ -582,4 +750,90 @@ st.divider()
 st.caption(
     "Sistema de apoio ao diagnóstico laboratorial · Uso restrito a profissionais de saúde · "
     "Não substitui avaliação médica presencial."
+)
+
+# ---------------------------------------------------------------------------
+# Habilita rolagem horizontal com a roda do mouse na caixa de tags dos
+# multiselects (sintomas, comorbidades, etc.).
+#
+# Colocado no FINAL do arquivo de propósito: assim, quando este script
+# rodar dentro do iframe do componente, todos os widgets da página já
+# foram renderizados no documento pai, evitando a corrida em que o script
+# tenta encontrar elementos que ainda não existem.
+#
+# Em vez de depender de uma estrutura fixa de divs aninhadas (que muda
+# entre versões do Streamlit), o script localiza o container correto
+# dinamicamente: ele parte das próprias "tags" (os itens já selecionados)
+# e usa o elemento-pai delas — que é, por definição, a caixa que precisa
+# rolar. O estilo (uma linha só, com overflow horizontal) é aplicado
+# diretamente via JavaScript, então não depende do CSS ter acertado o
+# seletor. O listener de "wheel" é registrado em fase de captura, para
+# rodar antes de qualquer outro handler que possa interceptar o evento.
+# ---------------------------------------------------------------------------
+components.html(
+    """
+    <script>
+    function habilitarScrollHorizontalMultiselect() {
+        let doc;
+        try {
+            doc = window.parent.document;
+        } catch (erro) {
+            return; // sem acesso ao documento pai (não deveria acontecer aqui)
+        }
+
+        const tags = doc.querySelectorAll('div[data-testid="stMultiSelect"] [data-baseweb="tag"]');
+        const containers = new Set();
+        tags.forEach((tag) => {
+            if (tag.parentElement) {
+                containers.add(tag.parentElement);
+            }
+        });
+
+        containers.forEach((caixa) => {
+            // Aplica o estilo diretamente no elemento, sem depender do CSS.
+            caixa.style.display = "flex";
+            caixa.style.flexWrap = "nowrap";
+            caixa.style.overflowX = "auto";
+            caixa.style.overflowY = "hidden";
+            caixa.style.scrollbarWidth = "thin";
+
+            if (!caixa.dataset.scrollHorizontalAtivo) {
+                caixa.dataset.scrollHorizontalAtivo = "true";
+                caixa.addEventListener(
+                    "wheel",
+                    function (evento) {
+                        if (caixa.scrollWidth > caixa.clientWidth) {
+                            evento.preventDefault();
+                            evento.stopPropagation();
+                            caixa.scrollLeft += evento.deltaY;
+                        }
+                    },
+                    { passive: false, capture: true }
+                );
+            }
+        });
+
+        return containers.size;
+    }
+
+    // Primeira tentativa imediata.
+    habilitarScrollHorizontalMultiselect();
+
+    // Reaplica sempre que o Streamlit re-renderizar a página (troca de
+    // aba, mudança de filtro, nova seleção, etc.), já que os elementos
+    // podem ser recriados.
+    try {
+        const observador = new MutationObserver(habilitarScrollHorizontalMultiselect);
+        observador.observe(window.parent.document.body, { childList: true, subtree: true });
+    } catch (erro) {
+        // ignora se não for possível observar (ambiente restrito)
+    }
+
+    // Rede de segurança: tenta novamente a cada meio segundo, caso o
+    // MutationObserver perca alguma atualização. A função é segura de
+    // rodar repetidamente (só registra o listener uma vez por elemento).
+    setInterval(habilitarScrollHorizontalMultiselect, 500);
+    </script>
+    """,
+    height=0,
 )
