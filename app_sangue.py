@@ -104,8 +104,8 @@ st.markdown(
             margin-top: 1.2rem;
         }
         .vote-row {
-            display: flex; justify-content: space-between; align-items: center;
-            background: white; border: 1px solid #E3E8EE; border-radius: 8px;
+            display: flex; justify-content: flex-end; align-items: center;
+            border: 1px solid #E3E8EE; border-radius: 8px;
             padding: 0.55rem 0.9rem; margin-bottom: 0.4rem; font-size: 0.9rem;
         }
     </style>
@@ -211,106 +211,100 @@ tab_novo, tab_historico = st.tabs(["🩺 Novo Diagnóstico", "🗂️ Histórico
 # ABA 1 — NOVO DIAGNÓSTICO
 # =============================================================================
 with tab_novo:
-    col_form, col_result = st.columns([1, 1.2], gap="large")
+    st.markdown("### 1. Dados do Paciente e do Exame")
 
-    with col_form:
-        st.markdown("### 1. Dados do Paciente e do Exame")
+    with st.form("patient_form", clear_on_submit=False):
+        st.markdown("**Identificação**")
+        c1, c2 = st.columns(2)
+        nome = c1.text_input("Nome completo do paciente *")
+        prontuario = c2.text_input("Prontuário / ID do exame")
 
-        with st.form("patient_form", clear_on_submit=False):
-            st.markdown("**Identificação**")
-            c1, c2 = st.columns(2)
-            nome = c1.text_input("Nome completo do paciente *")
-            prontuario = c2.text_input("Prontuário / ID do exame")
+        c3, c4, c5 = st.columns(3)
+        data_nascimento = c3.date_input(
+            "Data de nascimento", value=None, min_value=date(1900, 1, 1), max_value=date.today(), format="DD/MM/YYYY"
+        )
+        sexo = c4.selectbox("Sexo", ["Não informado", "Masculino", "Feminino", "Outro"])
+        data_exame = c5.date_input("Data do exame", value=date.today(), format="DD/MM/YYYY")
 
-            c3, c4, c5 = st.columns(3)
-            data_nascimento = c3.date_input(
-                "Data de nascimento", value=None, min_value=date(1900, 1, 1), max_value=date.today(), format="DD/MM/YYYY"
-            )
-            sexo = c4.selectbox("Sexo", ["Não informado", "Masculino", "Feminino", "Outro"])
-            data_exame = c5.date_input("Data do exame", value=date.today(), format="DD/MM/YYYY")
+        medico_solicitante = st.text_input("Médico solicitante")
+        indicacao_clinica = st.text_area(
+            "Indicação clínica / motivo do exame",
+            placeholder="Ex.: Check-up de rotina, investigação de fadiga e emagrecimento...",
+            height=70,
+        )
 
-            medico_solicitante = st.text_input("Médico solicitante")
-            indicacao_clinica = st.text_area(
-                "Indicação clínica / motivo do exame",
-                placeholder="Ex.: Check-up de rotina, investigação de fadiga e emagrecimento...",
-                height=70,
-            )
+        idade_manual = None
+        if not data_nascimento:
+            idade_manual = st.number_input("Idade (anos) — caso não informe a data de nascimento", min_value=0, max_value=120, value=0, step=1)
 
-            idade_manual = None
-            if not data_nascimento:
-                idade_manual = st.number_input("Idade (anos) — caso não informe a data de nascimento", min_value=0, max_value=120, value=0, step=1)
+        st.markdown("**Quadro clínico**")
+        c6, c7 = st.columns(2)
+        sintomas = c6.multiselect(
+            "Sintomas",
+            ["Fadiga", "Febre", "Sede excessiva", "Poliúria", "Perda de peso",
+             "Cefaleia", "Tontura", "Sangramentos/hematomas", "Palidez",
+             "Dor óssea", "Assintomático", "Outros"],
+        )
+        comorbidades = c7.multiselect(
+            "Comorbidades / fatores de risco",
+            ["Diabetes prévio", "Hipertensão prévia", "Histórico familiar de leucemia",
+             "Obesidade", "Tabagismo", "Sedentarismo", "Idade avançada (>65 anos)", "Outros"],
+        )
 
-            st.markdown("**Quadro clínico**")
-            c6, c7 = st.columns(2)
-            sintomas = c6.multiselect(
-                "Sintomas",
-                ["Fadiga", "Febre", "Sede excessiva", "Poliúria", "Perda de peso",
-                 "Cefaleia", "Tontura", "Sangramentos/hematomas", "Palidez",
-                 "Dor óssea", "Assintomático", "Outros"],
-            )
-            comorbidades = c7.multiselect(
-                "Comorbidades / fatores de risco",
-                ["Diabetes prévio", "Hipertensão prévia", "Histórico familiar de leucemia",
-                 "Obesidade", "Tabagismo", "Sedentarismo", "Idade avançada (>65 anos)", "Outros"],
-            )
+        st.markdown("**Hemograma e exames complementares**")
+        h1, h2, h3 = st.columns(3, vertical_alignment="bottom")
+        hemoglobina = h1.number_input(
+            "Hemoglobina (g/dL)", min_value=0.0, max_value=25.0, value=13.5, step=0.1,
+            help=REFERENCE_RANGES["hemoglobina"],
+        )
+        hematocrito = h2.number_input(
+            "Hematócrito (%)", min_value=0.0, max_value=70.0, value=41.0, step=0.1,
+            help=REFERENCE_RANGES["hematocrito"],
+        )
+        hemacias = h3.number_input(
+            "Hemácias (milhões/mm³)", min_value=0.0, max_value=10.0, value=4.8, step=0.1,
+            help=REFERENCE_RANGES["hemacias"],
+        )
 
-            st.markdown("**Hemograma e exames complementares**")
-            h1, h2, h3 = st.columns(3, vertical_alignment="bottom")
-            hemoglobina = h1.number_input(
-                "Hemoglobina (g/dL)", min_value=0.0, max_value=25.0, value=13.5, step=0.1,
-                help=REFERENCE_RANGES["hemoglobina"],
-            )
-            hematocrito = h2.number_input(
-                "Hematócrito (%)", min_value=0.0, max_value=70.0, value=41.0, step=0.1,
-                help=REFERENCE_RANGES["hematocrito"],
-            )
-            hemacias = h3.number_input(
-                "Hemácias (milhões/mm³)", min_value=0.0, max_value=10.0, value=4.8, step=0.1,
-                help=REFERENCE_RANGES["hemacias"],
-            )
+        h4, h5 = st.columns(2)
+        leucocitos = h4.number_input(
+            "Leucócitos (células/mm³)", min_value=0, max_value=200000, value=7500, step=100,
+            help=REFERENCE_RANGES["leucocitos"],
+        )
+        plaquetas = h5.number_input(
+            "Plaquetas (em milhares/mm³)", min_value=0, max_value=1000, value=250, step=5,
+            help=REFERENCE_RANGES["plaquetas"],
+        )
 
-            h4, h5 = st.columns(2)
-            leucocitos = h4.number_input(
-                "Leucócitos (células/mm³)", min_value=0, max_value=200000, value=7500, step=100,
-                help=REFERENCE_RANGES["leucocitos"],
-            )
-            plaquetas = h5.number_input(
-                "Plaquetas (em milhares/mm³)", min_value=0, max_value=1000, value=250, step=5,
-                help=REFERENCE_RANGES["plaquetas"],
-            )
+        h6, h7, h8 = st.columns(3)
+        glicemia = h6.number_input(
+            "Glicemia de jejum (mg/dL)", min_value=0, max_value=600, value=90, step=1,
+            help=REFERENCE_RANGES["glicemia"],
+        )
+        pressao_sistolica = h7.number_input(
+            "Pressão sistólica (mmHg)", min_value=0, max_value=260, value=120, step=1,
+            help=REFERENCE_RANGES["pressaoSistolica"],
+        )
+        pressao_diastolica = h8.number_input(
+            "Pressão diastólica (mmHg)", min_value=0, max_value=180, value=80, step=1,
+            help=REFERENCE_RANGES["pressaoDiastolica"],
+        )
 
-            h6, h7, h8 = st.columns(3)
-            glicemia = h6.number_input(
-                "Glicemia de jejum (mg/dL)", min_value=0, max_value=600, value=90, step=1,
-                help=REFERENCE_RANGES["glicemia"],
-            )
-            pressao_sistolica = h7.number_input(
-                "Pressão sistólica (mmHg)", min_value=0, max_value=260, value=120, step=1,
-                help=REFERENCE_RANGES["pressaoSistolica"],
-            )
-            pressao_diastolica = h8.number_input(
-                "Pressão diastólica (mmHg)", min_value=0, max_value=180, value=80, step=1,
-                help=REFERENCE_RANGES["pressaoDiastolica"],
-            )
+        observacoes = st.text_area("Observações clínicas adicionais", height=60)
+        responsavel_tecnico = st.text_input("Responsável técnico pela análise (biomédico/médico)")
 
-            observacoes = st.text_area("Observações clínicas adicionais", height=60)
-            responsavel_tecnico = st.text_input("Responsável técnico pela análise (biomédico/médico)")
+        submitted = st.form_submit_button(
+            "🔎 Iniciar Análise Diagnóstica", type="primary", use_container_width=True
+        )
 
-            submitted = st.form_submit_button(
-                "🔎 Iniciar Análise Diagnóstica", type="primary", use_container_width=True
-            )
+    st.divider()
+    st.markdown("### 2. Resultado da Análise")
+    result_placeholder = st.empty()
 
-    with col_result:
-        st.markdown("### 2. Resultado da Análise")
-        result_placeholder = st.empty()
+    if not submitted:
+        result_placeholder.info("O relatório aparecerá aqui...")
 
-        if not submitted:
-            result_placeholder.info(
-                "Preencha os dados do paciente e do hemograma e clique em "
-                "**Iniciar Análise Diagnóstica** para obter o resultado assistido por IA."
-            )
-
-        if submitted:
+    if submitted:
             idade = db.calculate_age(data_nascimento) if data_nascimento else (int(idade_manual) if idade_manual else None)
 
             if not nome:
@@ -471,7 +465,7 @@ with tab_novo:
                             st.markdown(
                                 f"""
                                 <div class="vote-row">
-                                    <span><strong>{r.model_name}</strong></span>
+                                    <span><strong>{r.model_name}:&nbsp</strong></span>
                                     <span style="color:{vote_color}; font-weight:700;">{r.label} ({r.confidence*100:.1f}%)</span>
                                 </div>
                                 """,
